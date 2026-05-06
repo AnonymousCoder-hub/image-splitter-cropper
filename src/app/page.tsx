@@ -36,16 +36,12 @@ import { saveAs } from 'file-saver'
 import { useToast } from '@/hooks/use-toast'
 
 const MIN_CROP = 20
-/** Max pixel dimension before blocking load outright */
-const MAX_DIMENSION_BLOCK = 16384
-/** Max pixel dimension before warning */
-const MAX_DIMENSION_WARNING = 8192
+/** Dimension above which we show a soft warning (no blocking) */
+const MAX_DIMENSION_WARNING = 16384
 /** Max number of images allowed at once */
 const MAX_IMAGE_COUNT = 500
 /** Concurrency limit for loading images simultaneously */
 const LOAD_CONCURRENCY = 4
-/** Max estimated total memory in MB before blocking additional loads */
-const MEMORY_BUDGET_MB = 2048
 
 type HSplitMode = 'count' | 'height'
 
@@ -327,34 +323,7 @@ export default function Home() {
           const objectUrl = URL.createObjectURL(file)
 
           return decodeImage(objectUrl).then((img) => {
-            // MEMORY GUARD: Block insanely large images
-            if (img.naturalWidth > MAX_DIMENSION_BLOCK || img.naturalHeight > MAX_DIMENSION_BLOCK) {
-              URL.revokeObjectURL(objectUrl)
-              skippedCount++
-              toast({
-                title: 'Image too large — skipped',
-                description: `${file.name}: ${img.naturalWidth}×${img.naturalHeight} exceeds ${MAX_DIMENSION_BLOCK}px limit`,
-                variant: 'destructive',
-              })
-              return
-            }
-
             const estimatedMB = (img.naturalWidth * img.naturalHeight * 4) / (1024 * 1024)
-
-            // MEMORY GUARD: Check total memory budget
-            const currentTotal = images.reduce((s, i) => s + i.estimatedMB, 0) +
-              estimatedMB * (fileArray.length - index) // rough estimate of what's coming
-
-            if (currentTotal > MEMORY_BUDGET_MB) {
-              URL.revokeObjectURL(objectUrl)
-              skippedCount++
-              toast({
-                title: 'Memory budget exceeded — skipped',
-                description: `${file.name} (~${estimatedMB.toFixed(0)} MB) would exceed ${MEMORY_BUDGET_MB} MB total budget`,
-                variant: 'destructive',
-              })
-              return
-            }
 
             const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
             const name = file.name.replace(/\.[^.]+$/, '')
@@ -377,12 +346,11 @@ export default function Home() {
             // Release the decoded bitmap — we only needed dimensions
             // The selected image will be re-decoded on demand via the useEffect above
 
-            // Warn about large images
+            // Soft info about large images (no blocking)
             if (img.naturalWidth > MAX_DIMENSION_WARNING || img.naturalHeight > MAX_DIMENSION_WARNING) {
               toast({
                 title: 'Large image loaded',
-                description: `${name}: ${img.naturalWidth}×${img.naturalHeight} (~${estimatedMB.toFixed(0)} MB)`,
-                variant: 'destructive',
+                description: `${name}: ${img.naturalWidth}×${img.naturalHeight} — only this image decoded in memory`,
               })
             }
 
@@ -723,7 +691,7 @@ export default function Home() {
                 </Badge>
               )}
               <Badge variant="outline" className="text-xs">
-                {totalEstimatedMB.toFixed(0)} MB
+                {images.length} loaded
               </Badge>
             </div>
           )}
@@ -912,7 +880,7 @@ export default function Home() {
                       {images.length}
                     </Badge>
                     <Badge variant="outline" className="text-xs">
-                      {totalEstimatedMB.toFixed(0)} MB
+                      {images.length} file{images.length !== 1 ? 's' : ''}
                     </Badge>
                   </CardTitle>
                 </CardHeader>
